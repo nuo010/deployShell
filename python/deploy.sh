@@ -424,9 +424,9 @@ functionItems() {
   echo -e "$YELLOW = 4. 📝 查看 $SERVICE_NAME 容器日志(-f) $RES"
   echo -e "$BLUE = 5. ❌ 全部删除容器 $SERVICE_NAME ($INSTANCES) 容器 $RES"
   echo -e "$YELLOW = 6. 🧱 创建 Dockerfile/.dockerignore、data、logs、back 目录 $RES"
-  echo -e "$GREEN = 7. 🟢 后台运行 Python 项目 ${bootpath}/${APP_ENTRY} $RES"
-  echo -e "$BLUE = 8. 📦 备份代码到 back 目录 $RES"
-  echo -e "$RED = 9. 🛑 结束后台 Python 进程 ${APP_ENTRY} $RES"
+#  echo -e "$GREEN = 7. 🟢 后台运行 Python 项目 ${bootpath}/${APP_ENTRY} $RES"
+#  echo -e "$BLUE = 8. 📦 备份代码到 back 目录 $RES"
+#  echo -e "$RED = 9. 🛑 结束后台 Python 进程 ${APP_ENTRY} $RES"
   echo
 }
 upgrade() {
@@ -493,16 +493,16 @@ main() {
     fi
     [ ! -f "$bootpath/.dockerignore" ] && createDockerIgnore && echo -e "${GREEN}.dockerignore 创建成功$RES"
     ;;
-  7)
-    runpythons
-    ;;
-  8)
-    backpython
-    ;;
-  9)
-    isPid
-    ps -ef | grep "[p]ython.*${APP_ENTRY}"
-    ;;
+#  7)
+#    runpythons
+#    ;;
+#  8)
+#    backpython
+#    ;;
+#  9)
+#    isPid
+#    ps -ef | grep "[p]ython.*${APP_ENTRY}"
+#    ;;
   *)
     echo " _________________            "
     echo -e "${RED}< 退出脚本成功!... >${RES}"
