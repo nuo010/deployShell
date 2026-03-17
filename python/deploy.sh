@@ -8,7 +8,6 @@ INSTRUCTIONS="部署 Python 项目(入口=当前目录唯一.py)"
 version=v3.4
 #################################################################
 # 更新计划
-
 # Python 基础镜像（仅当自动生成 Dockerfile 时使用）
 PYTHON_IMAGE=python:3.12-slim
 #=======================================
@@ -20,12 +19,6 @@ APP_ENTRY=""
 #======================================
 # 默认实例数
 INSTANCES=1
-# 手动启动还是自动启动 (默认手动启动 false) docker 方式
-################################################
-################################################
-#################devOps#########################
-################################################
-################################################
 # 或者执行脚本时添加 devops 参数即可
 AUTOMATIC=false
 #AUTOMATIC=true
@@ -48,11 +41,7 @@ DATA_PATH=data
 LOG_PATH=logs
 BACK_PATH=back
 
-# 本地ip
-# IP=$(ip a | grep inet | grep -v 127.0.0.1 | grep -v inet6 | grep -v docker | awk '{print $2}' | tr -d 'addr:' | awk -F '/' '{print $1}' | head -1)
-# 外网ip
-#IP=$(curl ifconfig.me)
-#IP="0.0.0.0"
+
 IP=$(ifconfig -a | grep inet | grep -v 127.0.0.1 | grep -v inet6 | awk '{print $2}' | tr -d "addrs" | tr '\n' ';')
 # 当前时间
 DATEVERSION=$(date +'%Y%m%d%H%M')
@@ -108,18 +97,7 @@ rmPortLogs() {
   fi
 }
 
-# get all filename in specified path
-getFileName() {
-  path=$1
-  files=$(ls $bootpath/jar)
-  for filename in $files; do
-    echo $filename # >> filename.txt
-  done
 
-  for file in $(find $1 -name "*.jar"); do
-    echo $file
-  done
-}
 
 # touch Dockerfile
 createDockerfile() {
