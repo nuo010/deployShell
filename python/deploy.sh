@@ -231,7 +231,7 @@ startContainer() {
       sleep 1
     fi
   done
-  docker container ps
+  # docker container ps
 }
 restartContainer() {
   for ((i = 0; i < $INSTANCES; i++)); do
@@ -256,7 +256,7 @@ stopContainer() {
       sleep 1
     fi
   done
-  docker container ps
+  # docker container ps
 }
 rmContainer() {
   for ((i = 0; i < $INSTANCES; i++)); do
@@ -268,7 +268,7 @@ rmContainer() {
       sleep 1
     fi
   done
-  docker container ps
+  # docker container ps
 }
 viewContainerLog() {
   if [ $INSTANCES -eq 1 ]; then
