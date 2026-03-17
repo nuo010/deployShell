@@ -208,7 +208,7 @@ runImage() {
     docker run \
       --name "$name" \
       --network host \
-      -v "$datapath":/data \
+      -v "$datapath":/app/data \
       --restart=always \
       --log-opt max-size=100m --log-opt max-file=10 \
       -d "$SERVICE_NAME":"$DATEVERSION"
