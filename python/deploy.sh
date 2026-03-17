@@ -17,6 +17,7 @@ PYTHON_PATH=""
 # 主入口脚本（空则自动取当前目录唯一的 .py）
 APP_ENTRY=""
 #======================================
+
 # 默认实例数
 INSTANCES=1
 # 或者执行脚本时添加 devops 参数即可
@@ -109,7 +110,6 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
-EXPOSE ${OPEN_PORT}
 CMD ["python", "${APP_ENTRY}"]
 DOCKERFILE_EOF
 }
@@ -204,7 +204,7 @@ runImage() {
     name=$SERVICE_NAME-$i
     port=$(($HOST_PORT + $i))
     docker container rm -f $name >>/dev/null 2>&1
-    echo -e $GREEN"📦创建容器: $name (端口 $port:$OPEN_PORT)"$RES
+    echo -e $GREEN"📦创建容器: $name "$RES
     docker run \
       --name "$name" \
       --network host \
@@ -225,7 +225,6 @@ startContainer() {
     port=$(($HOST_PORT + $i))
 
     docker container start $name >>/dev/null 2>&1
-    #    echo start container is $name:$port:$OPEN_PORT
     echo 启动容器: $name
     if [ $i -lt $INSTANCES ]; then
       sleep 1
@@ -239,7 +238,6 @@ restartContainer() {
     port=$(($HOST_PORT + $i))
 
     docker container restart $name >>/dev/null 2>&1
-    #    echo restart container is $name:$port:$OPEN_PORT
     echo 重启容器 $name
     if [ $i -lt $INSTANCES ]; then
       sleep 1
@@ -252,7 +250,6 @@ stopContainer() {
     name=$SERVICE_NAME-$i
     port=$(($HOST_PORT + $i))
     docker container stop $name >>/dev/null 2>&1
-    #    echo stop container is $name:$port:$OPEN_PORT
     echo 停止容器: $name
     if [ $i -lt $INSTANCES ]; then
       sleep 1
@@ -265,7 +262,6 @@ rmContainer() {
     name=$SERVICE_NAME-$i
     port=$(($HOST_PORT + $i))
     docker container rm $name >>/dev/null 2>&1
-    #    echo rm container is $name:$port:$OPEN_PORT
     echo 删除容器: $name
     if [ $i -lt $INSTANCES ]; then
       sleep 1
@@ -325,7 +321,6 @@ var() {
   echo 服务名称 "$SERVICE_NAME"
   echo 入口脚本 "${bootpath}/${SERVICE_PATH}"
   echo 实例数量 $INSTANCES
-  echo 端口映射 "$HOST_PORT:$OPEN_PORT"
   echo docker 镜像 "$SERVICE_NAME:$DATEVERSION"
   echo -e 宿主机 Python "${GREEN}$PYTHON_PATH${RES}"
   echo -e deploy 版本 "${GREEN}$version${RES}"
@@ -336,50 +331,6 @@ var() {
   echo
 }
 
-# setting env var
-setEnvironmentVariable() {
-  ARRT=$1
-  ARRT_NAME=$(echo "${ARRT}" | awk -F '=' '{print $1}')
-  ARRT_VALUE=$(echo "${ARRT}" | awk -F '=' '{print $2}')
-  # echo $ARRT_NAME is $ARRT_VALUE
-  # shellcheck disable=SC2086
-  if [ $ARRT_NAME == 'name' ]; then
-    SERVICE_NAME=$ARRT_VALUE
-  elif [ "$ARRT_NAME" == 'port' ]; then
-    OPEN_PORT=$ARRT_VALUE
-  elif [ "$ARRT_NAME" == 'ip' ]; then
-    IP=$ARRT_VALUE
-  elif [ $ARRT_NAME == 'i' ]; then
-    INSTANCES=$ARRT_VALUE
-  else
-    echo
-    echo -e $RED $ARRT no matches found. $RES
-    echo
-  fi
-}
-volumeList() {
-  docker volume ls -qf dangling=true
-}
-
-deleteVolumeList() {
-  docker volume rm $(docker volume ls -qf dangling=true)
-}
-isPort() {
-  echo "************ 检查端口占用(${HOST_PORT}) **************"
-  echo "************ 只能kill非docker容器占用的端口*************"
-  port=$(netstat -nlp | grep :"${HOST_PORT}" | awk '{print $7}')
-  port=${port%%/*}
-  if [ ${#port} -gt 1 ]; then
-    echo "端口占用-进程id: $port"
-    kill -9 "$port"
-    echo "开始 kill ${HOST_PORT} 端口占用进程!"
-    if [ "$?" -eq 0 ]; then
-      echo -e "\033[31mkill $port 成功!\033[0m"
-    else
-      echo -e "\033[31mkill $port 失败\033[0m"
-    fi
-  fi
-}
 getAppPid() {
   pid=$(ps -ef | grep "[p]ython.*${APP_ENTRY}" | awk '{print $2}')
   if [ -z "$pid" ]; then
@@ -466,13 +417,13 @@ rmBackup() {
 
 functionItems() {
   echo
-  echo -e "$GREEN = 0. 🚀 部署单个 Docker 容器（Python 项目）$RES"
+  echo -e "$GREEN = 0. 🚀 部署单个 Docker 容器$RES"
   echo -e "$BLUE = 1. 🔄 重启 $SERVICE_NAME ($INSTANCES) 容器 $RES"
   echo -e "$BLUE = 2. 🟢 启动容器 $SERVICE_NAME ($INSTANCES) 容器 $RES"
   echo -e "$RED = 3. 🛑 停止容器 $SERVICE_NAME ($INSTANCES) 容器 $RES"
   echo -e "$YELLOW = 4. 📝 查看 $SERVICE_NAME 容器日志(-f) $RES"
   echo -e "$BLUE = 5. ❌ 全部删除容器 $SERVICE_NAME ($INSTANCES) 容器 $RES"
-  echo -e "$YELLOW = 6. 🧱 创建 Dockerfile/.dockerignore、data、downloads、logs、back 目录 $RES"
+  echo -e "$YELLOW = 6. 🧱 创建 Dockerfile/.dockerignore、data、logs、back 目录 $RES"
   echo -e "$GREEN = 7. 🟢 后台运行 Python 项目 ${bootpath}/${APP_ENTRY} $RES"
   echo -e "$BLUE = 8. 📦 备份代码到 back 目录 $RES"
   echo -e "$RED = 9. 🛑 结束后台 Python 进程 ${APP_ENTRY} $RES"
@@ -569,12 +520,6 @@ echo -e "${YELLOW}当前工作目录:${bootpath}${RES}"
 #查看目录文件
 cd "$bootpath" || exit
 ls -all
-#for arg in $@
-#do
-#  setEnvironmentVariable $arg
-#done
-#版本信息
-#readme
 #当前时间
 current
 #变量值
