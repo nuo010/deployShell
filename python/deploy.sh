@@ -2,6 +2,7 @@
 # 李广龙
 # 脚本说明: 部署 Python 项目
 # 主目录只保留一个 .py 作为入口，其他 py 放到子文件夹；镜像名=入口文件名(无.py)
+# 在入口文件同目录新建data文件夹，该文件夹会挂载到docker镜像内
 INSTRUCTIONS="部署 Python 项目(入口=当前目录唯一.py)"
 # author: 李广龙
 # email: nuo010@126.com
