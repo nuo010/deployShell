@@ -101,7 +101,7 @@ deployDocker() {
     docker run -d \
       --name "$name" \
       --network host \
-      -v "$configpath:/app/config:ro" \
+      -v "$configpath:/app/config" \
       -v "$logspath:/app/logs" \
       --restart=always \
       --log-opt max-size=100m --log-opt max-file=5 \
