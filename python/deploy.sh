@@ -36,7 +36,7 @@ SERVICE_NAME=""
 # 主入口脚本路径（相对 bootpath，空则自动检测）
 SERVICE_PATH=""
 SERVER_ALL_PATH=""
-# 挂载目录（仅 data 用于配置/会话，不挂载 downloads）
+# 挂载目录
 DATA_PATH=data
 LOG_PATH=logs
 BACK_PATH=back
@@ -207,7 +207,7 @@ runImage() {
     echo -e $GREEN"📦创建容器: $name (端口 $port:$OPEN_PORT)"$RES
     docker run \
       --name "$name" \
-      -p "$port:$OPEN_PORT" \
+      --network host \
       -v "$datapath":/data \
       --restart=always \
       --log-opt max-size=100m --log-opt max-file=10 \
