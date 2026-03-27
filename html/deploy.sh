@@ -421,13 +421,7 @@ dockerLogsF() {
   # docker logs "$1" -f
   docker logs -f -t --tail=500 "$1"
 }
-sendMail() {
-  # 有的服务器可能因为库的原因发送不了邮件
-  # 当前功能没什么用,废弃了
-  echo 发送邮件通知
-  echo '{"data":"版本:'$DATEVERSION'IP:'$IP'","dizi":"nuo010@126.com","title":"服务部署通知:'$SERVICE_NAME'"}'
-  curl 'https://elel.fun/fastjson/sendMail' -H "Content-Type:application/json" -H 'Authorization:bearer' -X POST -d '{"data":"版本:'$DATEVERSION'----IP:'$IP'","dizi":"nuo010@126.com","title":"服务部署通知:'$SERVICE_NAME'"}'
-}
+
 
 var() {
   echo IP "$IP"
