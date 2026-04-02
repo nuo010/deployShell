@@ -19,10 +19,11 @@
 INSTRUCTIONS="脚本说明"
 # author: 李广龙
 # email: nuo010@126.com
-version=v3.4
+version=v3.5
 #################################################################
 # 更新计划
-
+# 3.5
+# 删除多余的输出内容
 # 3.4
 # 添加图标
 # 3.3
@@ -340,7 +341,7 @@ startContainer() {
       sleep 1
     fi
   done
-  docker container ps
+  # docker container ps
 }
 restartContainer() {
   for ((i = 0; i < $INSTANCES; i++)); do
@@ -367,7 +368,7 @@ stopContainer() {
       sleep 1
     fi
   done
-  docker container ps
+  # docker container ps
 }
 rmContainer() {
   for ((i = 0; i < $INSTANCES; i++)); do
@@ -380,7 +381,7 @@ rmContainer() {
       sleep 1
     fi
   done
-  docker container ps
+  # docker container ps
 }
 viewContainerLog() {
   if [ $INSTANCES -eq 1 ]; then
