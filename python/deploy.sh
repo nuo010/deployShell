@@ -106,7 +106,14 @@ createDockerfile() {
   # 镜像名/入口由变量决定：当前目录唯一 .py 作为入口，其名为 SERVICE_NAME
   cat >./Dockerfile <<DOCKERFILE_EOF
 FROM ${PYTHON_IMAGE}
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONUNBUFFERED=1 \
+    TZ=Asia/Shanghai \
+    DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends tzdata && \
+    ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
+    echo $TZ > /etc/timezone && \
+    rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --root-user-action=ignore --no-cache-dir -r requirements.txt
