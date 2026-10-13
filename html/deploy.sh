@@ -11,11 +11,13 @@
 INSTRUCTIONS="脚本说明"
 # author: 李广龙
 # email: nuo010@126.com
-version=v2.3
+version=v2.4
 #################################################################
 # 更新计划
 
 ##################################################################
+# 2.4
+# 重启命令改为 --restart=unless-stopped
 # 2.3
 # 优化缓存策略
 # 2.2
@@ -338,7 +340,7 @@ runImage() {
       --name "$name" \
       --network host \
       -v "$configpath":/etc/nginx/nginx.conf \
-      --restart=always \
+      --restart=unless-stopped \
       --log-opt max-size=100m --log-opt max-file=10 \
       -d "$SERVICE_NAME":"$DATEVERSION"
     CONTAINERID_NEW=$(docker container ps -a | grep "${name}" | awk '{print $NF}')

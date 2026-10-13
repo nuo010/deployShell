@@ -19,9 +19,12 @@
 INSTRUCTIONS="脚本说明"
 # author: 李广龙
 # email: nuo010@126.com
-version=v3.5
+version=v3.6
 #################################################################
 # 更新计划
+# 3.6
+# 重启命令改为 --restart=unless-stopped
+# 优化程序oom退出逻辑
 # 3.5
 # 删除多余的输出内容
 # 3.4
@@ -205,7 +208,8 @@ ENV TZ=Asia/Shanghai
 # jinfo -flags pid,jinfo -flag name pid,jmap -heap pid
 # 如果是大项目修改xms和xmx的值,越大越好,设置jdk编码为utf8解决打印中文,或者拉取nacos配置文件的时候出现乱码问题
 # 国产机器上加xms配置有可能会造成服务启动失败
-ENTRYPOINT ["java","-server","-Xms1024M","-Xmx1024M","-Dfile.encoding=UTF-8","-Duser.timezone=GMT+08","-jar","$SERVICE_NAME.jar","--Dspring.config.location=config/*"]
+# 添加内存oom 程序异常退出,并且生成堆转储文件,方便分析问题
+ENTRYPOINT ["java","-server","-Xms1g","-Xmx1g","-XX:+ExitOnOutOfMemoryError","-XX:+HeapDumpOnOutOfMemoryError","-XX:HeapDumpPath=config/dumps/","-Dfile.encoding=UTF-8","-Duser.timezone=GMT+08","-jar","$SERVICE_NAME.jar","--Dspring.config.location=config/*"]
 # ENTRYPOINT ["java","-Dfile.encoding=UTF-8","-Duser.timezone=GMT+08","-jar","$SERVICE_NAME.jar","--Dspring.config.location=config/*"]
 EOF
 }
@@ -313,7 +317,7 @@ runImage() {
       --network host \
       -v "$configpath":/code/config \
       -v "$logspath":/code/"$LOG_PATH" \
-      --restart=always \
+      --restart=unless-stopped \
       --log-opt max-size=100m --log-opt max-file=10 \
       -d "$SERVICE_NAME":"$DATEVERSION"
     # -m 2G --memory-reservation 1.5G \ 取消内存限制

@@ -103,7 +103,7 @@ deployDocker() {
       --network host \
       -v "$configpath:/app/config" \
       -v "$logspath:/app/logs" \
-      --restart=always \
+      --restart=unless-stopped \
       --log-opt max-size=100m --log-opt max-file=5 \
       "$SERVICE_NAME:$DATEVERSION"
   done
