@@ -62,17 +62,26 @@ WORKDIR /app
 COPY $BINARY_NAME .
 COPY config ./config
 RUN chmod +x ./$BINARY_NAME
+RUN apk add --no-cache tzdata
 ENV TZ=Asia/Shanghai
 ENTRYPOINT ["./$BINARY_NAME", "--config", "config"]
 EOF
-  echo -e "${GREEN}✅ Dockerfile 已生成${RES}"
+  createDockerIgnore
+  echo -e "${GREEN}✅ Dockerfile 和 .dockerignore 已生成${RES}"
+}
+
+createDockerIgnore() {
+  cat > "$bootpath/.dockerignore" <<EOF
+back
+logs
+EOF
 }
 
 backupBinary() {
   cp "$SERVER_BIN_PATH" "$backpath/${DATEVERSION}_${BINARY_NAME}"
   echo -e "${GREEN}📦 二进制已备份: ${backpath}/${DATEVERSION}_${BINARY_NAME}${RES}"
   # 清理旧备份
-  ls -1t "$backpath"/"${BINARY_NAME}"* 2>/dev/null | tail -n +$((ReservedBinNum + 1)) | xargs -r rm
+  ls -1t "$backpath"/*_"$BINARY_NAME" 2>/dev/null | tail -n +$((ReservedBinNum + 1)) | xargs -r rm
 }
 
 deployDocker() {
