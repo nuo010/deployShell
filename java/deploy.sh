@@ -223,33 +223,33 @@ EOF
 createConfLogs() {
   #如果文件夹不存在，则创建文件夹
   if [ ! -d "$bootpath/config" ]; then
-    mkdir config
+    mkdir config || return 1
     echo -e "${GREEN} 创建config文件夹成功!${RES}"
   fi
   if [ ! -d "$bootpath/logs" ]; then
-    mkdir logs
+    mkdir logs || return 1
     echo -e "${GREEN} 创建logs文件夹成功!${RES}"
   fi
   if [ ! -d "$bootpath/back" ]; then
-    mkdir back
+    mkdir back || return 1
     echo -e "${GREEN} 创建back文件夹成功!${RES}"
   fi
 
   #如果文件不存在，则创建文件
   if [ ! -f "$bootpath/Dockerfile" ]; then
     echo -e "${GREEN} 创建DockerFile文件成功!${RES}"
-    createDockerfile
+    createDockerfile || return 1
   fi
   if [ ! -f "$bootpath/.dockerignore" ]; then
     createDockerIgnore
   fi
 }
 init() {
-  createConfLogs
+  createConfLogs || return 1
   jarNum=$(ls -l | grep ".jar" | wc -l)
   if [ $jarNum -ne 1 ]; then
     echo -e "${RED} "$bootpath 文件夹下jar包数量不等于1,退出脚本!"${RES}"
-    exit 0
+    return 1
   fi
 }
 
@@ -264,14 +264,17 @@ deleteOldAllImage() {
   #docker image ls
 }
 deleteServerNameAllImage() {
-  echo -e "${RED}❌删除${SERVICE_NAME}镜像,只保留最新的${ReservedDockerImagesNum}个${RES}"
-  echo -e "${RED}❌版本不同镜像id相同的需要手动进行删除${RES}"
-  arr=$(docker images --no-trunc | grep "${SERVICE_NAME}" | tr -s ' ' | cut -d ' ' -f 3 | cut -d ':' -f 2)
-  array=(${arr//\n/ })
-  echo -e "${RED}❌当前备份镜像数量:${#array[*]}${RES}"
-  if [ ${#array[*]} -ge ${ReservedDockerImagesNum} ]; then
-    docker rmi -f $(docker images --no-trunc | grep "${SERVICE_NAME}" | tail -n +${ReservedDockerImagesNum} | tr -s ' ' | cut -d ' ' -f 3 | cut -d ':' -f 2)
-  fi
+  local images tags tag count=0 status=0
+  [[ "$ReservedDockerImagesNum" =~ ^[0-9]+$ ]] || return 1
+  images=$(docker images --format '{{.Repository}} {{.Tag}}') || return 1
+  tags=$(printf '%s\n' "$images" | awk -v repo="$SERVICE_NAME" '$1 == repo && $2 != "<none>" {print $2}' | sort -Vr) || return 1
+  while IFS= read -r tag; do
+    [ -n "$tag" ] || continue
+    count=$((count + 1))
+    [ "$count" -gt "$ReservedDockerImagesNum" ] || continue
+    docker rmi "$SERVICE_NAME:$tag" || status=1
+  done <<< "$tags"
+  return "$status"
 }
 # delete old containers
 deleteOldContainer() {
@@ -290,25 +293,18 @@ deleteOldContainer() {
 # 打包docker镜像
 # 已当前运行脚本的时间为版本号
 buildImage() {
-  docker build -t $SERVICE_NAME:$DATEVERSION .
+  docker build -t "$SERVICE_NAME:$DATEVERSION" "$bootpath" || return 1
   #  docker image ls
 }
 
 # 运行镜像
 # 默认单实例 运行1个
 runImage() {
-  for ((i = 0; i < $INSTANCES; i++)); do
-    name=$SERVICE_NAME-$i
-    # 强制删除已存在的容器
-    docker container rm -f $name >>/dev/null 2>&1
-    echo "❌删除容器>>>>>>>>>>>>>>>>>>>>>>: $name"
-  done
-  rmPortLogs
+  rmContainer || return 1
+  rmPortLogs || return 1
   for ((i = 0; i < $INSTANCES; i++)); do
     name=$SERVICE_NAME-$i
     port=$(($HOST_PORT + $i))
-    # 强制删除已存在的容器
-    docker container rm -f $name >>/dev/null 2>&1
     #    echo "创建容器是:$name:$IP:$port:$OPEN_PORT"
     echo -e $GREEN"📦创建容器是:>>>>>>>>>>>>>>>>>>>>>>: $name" $RES
     # 只挂载logs日志文件配置文件不挂载
@@ -319,7 +315,8 @@ runImage() {
       -v "$logspath":/code/"$LOG_PATH" \
       --restart=unless-stopped \
       --log-opt max-size=100m --log-opt max-file=10 \
-      -d "$SERVICE_NAME":"$DATEVERSION"
+      -d "$SERVICE_NAME":"$DATEVERSION" || return 1
+    [ "$(docker inspect --format '{{.State.Running}}' "$name")" = true ] || return 1
     # -m 2G --memory-reservation 1.5G \ 取消内存限制
     # --privileged=true \ 默认是普通用户 使用root权限
     # -m 300M --memory-reservation 200M \ 要配合jvm同时进行限制,docker 不要限制太低,容易崩,重启....
@@ -338,7 +335,7 @@ startContainer() {
     name=$SERVICE_NAME-$i
     port=$(($HOST_PORT + $i))
 
-    docker container start $name >>/dev/null 2>&1
+    docker container start "$name" || { echo "启动失败: $name；后续实例未执行" >&2; return 1; }
     #    echo start container is $name:$port:$OPEN_PORT
     echo 启动容器: $name
     if [ $i -lt $INSTANCES ]; then
@@ -352,7 +349,7 @@ restartContainer() {
     name=$SERVICE_NAME-$i
     port=$(($HOST_PORT + $i))
 
-    docker container restart $name >>/dev/null 2>&1
+    docker container restart "$name" || { echo "重启失败: $name；后续实例未执行" >&2; return 1; }
     #    echo restart container is $name:$port:$OPEN_PORT
     echo 重启容器 $name
     if [ $i -lt $INSTANCES ]; then
@@ -365,7 +362,7 @@ stopContainer() {
   for ((i = 0; i < $INSTANCES; i++)); do
     name=$SERVICE_NAME-$i
     port=$(($HOST_PORT + $i))
-    docker container stop $name >>/dev/null 2>&1
+    docker container stop "$name" || { echo "停止失败: $name；后续实例未执行" >&2; return 1; }
     #    echo stop container is $name:$port:$OPEN_PORT
     echo 停止容器: $name
     if [ $i -lt $INSTANCES ]; then
@@ -375,17 +372,15 @@ stopContainer() {
   # docker container ps
 }
 rmContainer() {
-  for ((i = 0; i < $INSTANCES; i++)); do
-    name=$SERVICE_NAME-$i
-    port=$(($HOST_PORT + $i))
-    docker container rm $name >>/dev/null 2>&1
-    #    echo rm container is $name:$port:$OPEN_PORT
-    echo 删除容器: $name
-    if [ $i -lt $INSTANCES ]; then
-      sleep 1
-    fi
-  done
-  # docker container ps
+  local names name suffix
+  names=$(docker container ls -a --format '{{.Names}}') || return
+  while IFS= read -r name; do
+    [[ "$name" == "$SERVICE_NAME-"* ]] || continue
+    suffix=${name#"$SERVICE_NAME-"}
+    [[ "$suffix" =~ ^[0-9]+$ ]] || continue
+    docker container rm -f "$name" || return
+  done <<< "$names"
+  return 0
 }
 viewContainerLog() {
   if [ $INSTANCES -eq 1 ]; then
@@ -413,7 +408,7 @@ current() {
 }
 dockerRestart() {
   echo " 重启$SERVICE_NAME容器"
-  docker restart "$SERVICE_NAME"-0
+  docker restart "$SERVICE_NAME"-0 || return 1
   echo -e "$RED 重启$SERVICE_NAME-0容器 成功!!!$RES"
 }
 
@@ -508,74 +503,76 @@ isPort() {
   fi
 }
 getJarPid() {
-  #  pid=$(ps -ef | grep -w "$SERVICE_PATH" | grep -v grep | awk '{print $2}' | head -n 1)
-  pid=$(ps -ef | grep -w "$SERVICE_PATH" | grep -v grep | awk '{print $2}')
-  # shellcheck disable=SC2206
-  array=(${pid//\n/ })
-  #  echo ${#array[*]}
-  if [ ${#array[*]} -gt 1 ]; then
-    echo "重名jar"
-  else
-    echo "$pid"
-  fi
+  local processes matches
+  # ps 的文本格式无法可靠区分含空白的参数，遇到此类路径拒绝自动结束。
+  [[ "$SERVER_ALL_PATH" == /* && "$SERVER_ALL_PATH" != *[[:space:]]* ]] || return 1
+  processes=$(ps -ww -eo pid=,comm=,args=) || return 1
+  matches=$(printf '%s\n' "$processes" | awk -v jar="$SERVER_ALL_PATH" '
+    { n=split($2, exe, "/"); if (exe[n] != "java") next
+      for (i=4; i<=NF; i++) if ($i == "-jar") {
+        if ($(i+1) == jar) print $1
+        else if (substr($(i+1), 1, 1) != "/") uncertain=1
+        break
+      }
+    }
+    END { if (uncertain) exit 1 }
+  ') || { echo "存在相对路径 Java 启动参数，拒绝自动结束" >&2; return 1; }
+  [[ "$matches" != *$'\n'* && ( -z "$matches" || "$matches" =~ ^[0-9]+$ ) ]] || {
+    echo "存在多个目标 Java 进程，拒绝自动结束" >&2; return 1;
+  }
+  printf '%s\n' "$matches"
 }
 isPid() {
-  echo "************** 查找进程($SERVICE_PATH) ****************"
-  ps -ef | grep -w "$SERVICE_PATH" | grep -v grep
-  pid=$(getJarPid)
-  #  echo "ispid:"$pid
-  echo "${bootpath}/${SERVICE_PATH} 进程id: $pid"
-  if [ -n "$pid" ]; then
-    if [ "重名jar" == "$pid" ]; then
-      echo -e "$RED存在重名jar包,请手动处理!$RES"
-      exit 1
-    fi
-    echo "检测进程Pid不为空:" $pid
-    kill -15 "$pid"
-    for ((i = 1; i < 20; i++)); do
-      pid=$(getJarPid)
-      echo "等待 $SERVICE_PATH 资源关闭,等待次数:$i/20,Pid: $pid"
-      sleep 1
-      if [ -z "$pid" ]; then
-        echo -e "\033[31mkill -15 $pid 成功!\033[0m"
-        break
-      fi
-    done
+  local target current attempt
+  target=$(getJarPid) || return 1
+  [ -n "$target" ] || return 0
+  current=$(getJarPid) || return 1
+  [ "$current" = "$target" ] || return 1
+  kill -15 "$target" || return 1
+  for ((attempt=0; attempt<20; attempt++)); do
+    current=$(getJarPid) || return 1
+    [ -n "$current" ] || return 0
+    [ "$current" = "$target" ] || return 1
     sleep 1
-    # 进程还存在的话......强制关闭tmd
-    pid=$(getJarPid)
-    if [ -n "$pid" ]; then
-      kill -9 "$pid"
-      for ((i = 1; i < 10; i++)); do
-        pid=$(getJarPid)
-        echo "强制关闭,等待进程结束 $SERVICE_PATH ,等待次数:$i/10,Pid: $pid"
-        sleep 1
-        if [ -z "$pid" ]; then
-          echo -e "\033[31mkill -9 $pid 成功!\033[0m"
-          break
-        fi
-      done
-    fi
-    pid=$(getJarPid)
-    # 进程还存在的话......手动处理吧... kill -9 都关闭不掉,就给父进程有关系了
-    if [ -n "$pid" ]; then
-      echo -e "\033[31m手动处理吧!...... \033[0m"
-    fi
-  else
-    echo -e "$RED进程不存在!$RES"
-  fi
-  echo "************** 关闭进程完毕 ****************"
+  done
+  # 发出强制信号前再次确认，绝不结束后来出现的不同 PID。
+  current=$(getJarPid) || return 1
+  [ -n "$current" ] || return 0
+  [ "$current" = "$target" ] || return 1
+  kill -9 "$target" || return 1
+  for ((attempt=0; attempt<10; attempt++)); do
+    current=$(getJarPid) || return 1
+    [ -n "$current" ] || return 0
+    [ "$current" = "$target" ] || return 1
+    sleep 1
+  done
+  echo "进程未退出，请手动处理" >&2
+  return 1
 }
 runjar() {
-  echo "************** 开始运行jar ****************"
-  pid=$(nohup ${JAVA_PATH} -jar ${bootpath}/${SERVICE_PATH} --Dspring.config.location="${bootpath}"/config/* >/dev/null 2>&1 &)
-  echo -e "$GREEN${bootpath}/${SERVICE_PATH}$RES"
-  echo "************** 运行完成 ****************"
+  local started current
+  [[ "$SERVER_ALL_PATH" == /* && "$SERVER_ALL_PATH" != *[[:space:]]* ]] || return 1
+  nohup "$JAVA_PATH" -jar "$SERVER_ALL_PATH" "--Dspring.config.location=${bootpath}/config/*" >/dev/null 2>&1 &
+  started=$!
+  sleep 2
+  current=$(getJarPid) || return 1
+  [ "$current" = "$started" ] || { echo "JAR 启动失败" >&2; return 1; }
+  echo "后台 JAR 已启动，PID: $started"
 }
 # 部署方式为后台运行jar时使用此方法
 backjar() {
   echo "📦************** 开始备份jar ****************"
-  cp "${SERVICE_NAME}.jar" back/"${DATEVERSION}".jar
+  mkdir -p "$backpath" || return 1
+  local backup
+  backup=$(mktemp "$backpath/$(date +'%Y%m%d%H%M%S').XXXXXX") || return 1
+  DATEVERSION=${backup##*/}
+  # 保留占位文件，确保并发备份也不会复用版本。
+  [ ! -e "$backup.jar" ] && [ ! -L "$backup.jar" ] || { rm -f "$backup"; return 1; }
+  if ! cp "$SERVER_ALL_PATH" "$backup.jar"; then
+    rm -f "$backup.jar" "$backup"
+    return 1
+  fi
+  rm -f "$backup" || return 1
   echo -e "$GREEN备份路径:back/${DATEVERSION}.jar $RES"
   echo "📦************** 备份完成 ****************"
 }
@@ -588,7 +585,7 @@ rmjar() {
     #取最旧的文件，*.*可以改为指定文件类型
     OldFile=$(ls -rt *.jar | head -1)
     echo -e "$RED清理过时备份文件:$backpath/$OldFile $RES"
-    rm -f $backpath'/'$OldFile
+    rm -f "$backpath/$OldFile" || return 1
     let "FileNum--"
   done
   cd "$bootpath" || exit
@@ -601,47 +598,33 @@ functionItems() {
   echo
   echo
   echo
-  echo -e "$GREEN = 0. 🚀部署单个docker容器 $RES"
-  echo -e "$BLUE = 1. 🔄重启 $SERVICE_NAME ($INSTANCES)容器(重新加载config下配置文件) $RES"
-  echo -e "$BLUE = 2. 🟢启动容器 $SERVICE_NAME ($INSTANCES)容器 $RES"
-  echo -e "$RED = 3. 🛑停止容器 $SERVICE_NAME ($INSTANCES)容器 $RES"
-  echo -e "$YELLOW = 4. 📝查看 $SERVICE_NAME ($INSTANCES)容器 日志(-f) $RES"
-  echo -e "$BLUE = 5. ❌全部删除容器 $SERVICE_NAME ($INSTANCES)容器 $RES"
-  echo -e "$YELLOW = 6. 🧱在当前目录创建 Dockerfile,dockerIgnore文件config,logs,back文件夹  $RES"
-  echo -e "$GREEN = 7. 🟢后台部署jar ${bootpath}/${SERVICE_PATH} $RES"
-  echo -e "$BLUE = 8. 📦备份${SERVER_ALL_PATH}到当前back文件夹下 $RES"
-  echo -e "$RED = 9. 🛑结束后台jar包 ${bootpath}/${SERVICE_PATH}  $RES"
+  echo -e "$GREEN = 0. 部署 $SERVICE_NAME ($INSTANCES)容器 $RES"
+  echo -e "$BLUE = 1. 重启 $SERVICE_NAME ($INSTANCES)容器 $RES"
+  echo -e "$RED = 2. 停止容器（不删除） $SERVICE_NAME ($INSTANCES) $RES"
+  echo -e "$BLUE = 3. 删除该服务的全部实例容器 $SERVICE_NAME ($INSTANCES) $RES"
+  echo -e "$YELLOW = 4. 查看日志 $SERVICE_NAME ($INSTANCES) $RES"
+  echo -e "$YELLOW = 5. 创建配置文件和目录（已有文件不覆盖） $RES"
+  echo -e "$GREEN = 6. 后台运行 JAR ${bootpath}/${SERVICE_PATH} $RES"
+  echo -e "$BLUE = 7. 备份 JAR 到 back 目录 $RES"
+  echo -e "$RED = 8. 结束后台运行的 JAR 进程 ${bootpath}/${SERVICE_PATH} $RES"
 
   echo
 }
 upgrade() {
-  init
-  backjar
-  rmjar
+  init || return 1
+  backjar || { echo "备份失败，停止部署" >&2; return 1; }
+  buildImage || { echo "构建失败，保留旧容器" >&2; return 1; }
+  runImage || { echo "启动失败，停止部署" >&2; return 1; }
+  echo "部署成功: $SERVICE_NAME:$DATEVERSION"
+  rmjar || return 1
   deleteServerNameAllImage
-  #echo -e "${GREEN}❌删除容器成功${RES}"
-  #deleteOldAllImage
-  #echo -e "${GREEN}📦备份镜像成功${RES}"
-  buildImage
-  echo -e "${GREEN}📦打包镜像成功${SERVICE_NAME}${RES}"
-  #isPort 不需要检查端口
-  runImage
-  echo -e "${GREEN} 🚀运行镜像成功 🚀${RES}"
 }
 runjars() {
-  init
-  isPid
-  #isPort #访问和项目端口可能不一样不检测端口
-  # 运行前先备份
+  init || return 1
+  backjar || { echo "备份失败，保留原进程" >&2; return 1; }
+  isPid || { echo "无法安全结束进程，停止部署" >&2; return 1; }
+  runjar || return 1
   rmjar
-  backjar
-  runjar
-  sleep 2
-  echo "************** 进程详情 **************"
-  ps -ef | grep -w "$SERVICE_PATH" | grep -v grep
-  pid=$(getJarPid)
-  echo -e "${RED}Pid:$pid${RES}"
-  echo "************** 后台启动jar完成！**************"
 }
 
 # shellcheck disable=SC2120
@@ -655,43 +638,28 @@ main() {
     upgrade
     ;;
   1)
-    restartContainer
-    echo -e "${GREEN}重启容器${RES}"
+    if restartContainer; then echo "重启容器成功"; else echo "重启容器失败" >&2; return 1; fi
     ;;
   2)
-    startContainer
-    echo -e "${GREEN}启动容器:${SERVICE_NAME}${RES}"
+    if stopContainer; then echo "停止容器成功"; else echo "停止容器失败" >&2; return 1; fi
     ;;
   3)
-    stopContainer
-    echo -e "${GREEN}停止容器:${SERVICE_NAME}${RES}"
+    if rmContainer; then echo "删除容器成功"; else echo "删除容器失败" >&2; return 1; fi
     ;;
   4)
     dockerLogs
     ;;
   5)
-    rmContainer
-    echo -e "${GREEN}删除容器:${SERVICE_NAME}${RES}"
+    createConfLogs
     ;;
   6)
-    createDockerfile
-    createDockerIgnore
-    echo -e "${GREEN}Dockerfile 创建成功,默认基于 $JDK_NAME:$JDK_VERSION $RES"
-    cat Dockerfile
-    echo -e "${GREEN}dockerIgnore 创建成功$RES"
-    cat .dockerignore
-    createConfLogs
-    echo -e "${GREEN}创建config、logs、back 文件夹成功$RES"
-    ;;
-  7)
     runjars
     ;;
-  8)
+  7)
     backjar
     ;;
-  9)
-    isPid
-    ps -ef | grep -w "$SERVICE_PATH" | grep -v grep
+  8)
+    if isPid; then echo "目标 JAR 已停止"; else echo "结束 JAR 失败，请手动检查" >&2; return 1; fi
     ;;
   *)
     echo " _________________            "
@@ -725,9 +693,9 @@ var
 if [ $AUTOMATIC = true ] || [ "$1" == "devops" ]; then
   # 判断是jar还是docker
   if [ "docker" == $DEVOPSMODE ]; then
-    upgrade
+    upgrade || exit 1
   else
-    runjars
+    runjars || exit 1
   fi
   if [ $SENDMAIL = true ]; then
     sendMail

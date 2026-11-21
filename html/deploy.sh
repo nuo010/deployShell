@@ -240,7 +240,7 @@ EOF
 createConfLogs() {
   echo -e "${GREEN} 初始化配置文件!${RES}"
   #如果文件夹不存在，则创建文件夹
-  if [ ! -d "$bootpath/nginx.conf" ]; then
+  if [ ! -f "$bootpath/nginx.conf" ]; then
     echo -n "请输入Nginx监听端口(默认 13001): "
     read NGINX_PORT
     # 检查userInput是否为空或只包含空格
@@ -261,7 +261,7 @@ createConfLogs() {
     echo -e "${GREEN} 创建DockerFile文件成功!${RES}"
     createDockerfile
   fi
-  if [ ! -f "$bootpath/dist" ]; then
+  if [ ! -d "$bootpath/dist" ]; then
     echo -e "${GREEN} 创建dist文件夹成功!${RES}"
     mkdir dist
   fi
@@ -273,7 +273,7 @@ init() {
   if [ ${#SERVICE_NAME} == 0 ]; then
     echo -e "$RED 请先使用命令5创建容器名称文件 $RES"
     echo -e "$RED 创建成功后退出脚本并重新运行 $RES"
-    exit 0
+    return 1
   fi
 }
 
@@ -296,14 +296,17 @@ creatNameFile(){
 }
 
 deleteServerNameAllImage() {
-  echo -e "${RED}删除${SERVICE_NAME}镜像,只保留最新的${ReservedDockerImagesNum}个${RES}"
-  echo -e "${RED}版本不同镜像id相同的需要手动进行删除${RES}"
-  arr=$(docker images --no-trunc | grep "${SERVICE_NAME}" | tr -s ' ' | cut -d ' ' -f 3 | cut -d ':' -f 2)
-  array=(${arr//\n/ })
-  echo -e "${RED}当前备份镜像数量:${#array[*]}${RES}"
-  if [ ${#array[*]} -gt ${ReservedDockerImagesNum} ]; then
-    docker rmi -f $(docker images --no-trunc | grep "${SERVICE_NAME}" | tail -n +${ReservedDockerImagesNum} | tr -s ' ' | cut -d ' ' -f 3 | cut -d ':' -f 2)
-  fi
+  local images tags tag count=0 status=0
+  [[ "$ReservedDockerImagesNum" =~ ^[0-9]+$ ]] || return 1
+  images=$(docker images --format '{{.Repository}} {{.Tag}}') || return 1
+  tags=$(printf '%s\n' "$images" | awk -v repo="$SERVICE_NAME" '$1 == repo && $2 != "<none>" {print $2}' | sort -Vr) || return 1
+  while IFS= read -r tag; do
+    [ -n "$tag" ] || continue
+    count=$((count + 1))
+    [ "$count" -gt "$ReservedDockerImagesNum" ] || continue
+    docker rmi "$SERVICE_NAME:$tag" || status=1
+  done <<< "$tags"
+  return "$status"
 }
 deleteOldContainer() {
   OLD_INSTANCES=$(docker container ps -a | grep -i $SERVICE_NAME | wc -l)
@@ -319,20 +322,14 @@ deleteOldContainer() {
 }
 
 buildImage() {
-  docker build -t $SERVICE_NAME:$DATEVERSION .
+  docker build -t "$SERVICE_NAME:$DATEVERSION" "$bootpath" || return 1
 }
 
 runImage() {
-  for ((i = 0; i < $INSTANCES; i++)); do
-    name=$SERVICE_NAME-$i
-    docker container rm -f $name >>/dev/null 2>&1
-    echo "删除容器>>>>>>>>>>>>>>>>>>>>>>: $name"
-  done
+  rmContainer || return 1
   for ((i = 0; i < $INSTANCES; i++)); do
     name=$SERVICE_NAME-$i
     port=$(($HOST_PORT + $i))
-    # 强制删除已存在的容器
-    docker container rm -f $name >>/dev/null 2>&1
     #    echo "创建容器是:$name:$IP:$port:$OPEN_PORT"
     echo -e $GREEN"创建容器是:>>>>>>>>>>>>>>>>>>>>>>: $name" $RES
     # 只挂载logs日志文件配置文件不挂载
@@ -342,7 +339,8 @@ runImage() {
       -v "$configpath":/etc/nginx/nginx.conf \
       --restart=unless-stopped \
       --log-opt max-size=100m --log-opt max-file=10 \
-      -d "$SERVICE_NAME":"$DATEVERSION"
+      -d "$SERVICE_NAME":"$DATEVERSION" || return 1
+    [ "$(docker inspect --format '{{.State.Running}}' "$name")" = true ] || return 1
     CONTAINERID_NEW=$(docker container ps -a | grep "${name}" | awk '{print $NF}')
     echo -e 已创建容器: $PINK"$CONTAINERID_NEW"$RES
     if [ $i -lt $INSTANCES ]; then
@@ -354,7 +352,7 @@ startContainer() {
   for ((i = 0; i < $INSTANCES; i++)); do
     name=$SERVICE_NAME-$i
     port=$(($HOST_PORT + $i))
-    docker container start $name >>/dev/null 2>&1
+    docker container start "$name" || { echo "启动失败: $name；后续实例未执行" >&2; return 1; }
     echo 启动容器: $name
     if [ $i -lt $INSTANCES ]; then
       sleep 1
@@ -366,7 +364,7 @@ restartContainer() {
   for ((i = 0; i < $INSTANCES; i++)); do
     name=$SERVICE_NAME-$i
     port=$(($HOST_PORT + $i))
-    docker container restart $name >>/dev/null 2>&1
+    docker container restart "$name" || { echo "重启失败: $name；后续实例未执行" >&2; return 1; }
     echo 重启容器 $name
     if [ $i -lt $INSTANCES ]; then
       sleep 1
@@ -378,7 +376,7 @@ stopContainer() {
   for ((i = 0; i < $INSTANCES; i++)); do
     name=$SERVICE_NAME-$i
     port=$(($HOST_PORT + $i))
-    docker container stop $name >>/dev/null 2>&1
+    docker container stop "$name" || { echo "停止失败: $name；后续实例未执行" >&2; return 1; }
     echo 停止容器: $name
     if [ $i -lt $INSTANCES ]; then
       sleep 1
@@ -398,16 +396,15 @@ dockerLogs() {
   fi
 }
 rmContainer() {
-  for ((i = 0; i < $INSTANCES; i++)); do
-    name=$SERVICE_NAME-$i
-    port=$(($HOST_PORT + $i))
-    docker container rm $name >>/dev/null 2>&1
-    echo 删除容器: $name
-    if [ $i -lt $INSTANCES ]; then
-      sleep 1
-    fi
-  done
-  docker container ps
+  local names name suffix
+  names=$(docker container ls -a --format '{{.Names}}') || return
+  while IFS= read -r name; do
+    [[ "$name" == "$SERVICE_NAME-"* ]] || continue
+    suffix=${name#"$SERVICE_NAME-"}
+    [[ "$suffix" =~ ^[0-9]+$ ]] || continue
+    docker container rm -f "$name" || return
+  done <<< "$names"
+  return 0
 }
 
 
@@ -468,8 +465,14 @@ deleteVolumeList() {
 
 backHtml() {
   echo "************** 开始备份文件 ****************"
-  cd "${bootpath}" || exit
-  cp -r "${bootpath}"/dist back/"${DATEVERSION}"/
+  mkdir -p "$backpath" || return 1
+  local backup
+  backup=$(mktemp -d "$backpath/$(date +'%Y%m%d%H%M%S').XXXXXX") || return 1
+  DATEVERSION=${backup##*/}
+  if ! cp -R "$bootpath$DIST_PATH/." "$backup/"; then
+    rm -rf "$backup"
+    return 1
+  fi
   echo -e "$GREEN备份路径:back/${DATEVERSION} $RES"
   echo "************** 备份完成 ****************"
 }
@@ -481,73 +484,77 @@ rmHtml() {
   do
     OldFile=$(ls -l -t -r | tail -n +2 | head -1 | awk '{print $9}')
     echo -e "清理过时备份文件夹: ""$bootpath"$BACK_PATH/${OldFile}
-    rm -rf "$bootpath$BACK_PATH"/${OldFile}
+    [ -n "$OldFile" ] || return 1
+    rm -rf "$bootpath$BACK_PATH/${OldFile}" || return 1
     let "Num--"
   done
   cd $bootpath || exit
   echo "************** 删除完成默认保留:$ReservedJarNum 个 ****************"
 }
-rmDist() {
-  echo "************** 清理dist文件夹 ****************"
-  cd "$bootpath"$DIST_PATH || exit
-  echo -e "清理dist文件夹: ""$bootpath"$DIST_PATH
-  rm -rf "$bootpath$DIST_PATH"/*
-  cd $bootpath || exit
-  echo "************** 清理dist文件夹成功  ****************"
-}
+rmDist() (
+  shopt -s dotglob nullglob
+  [ -d "$bootpath$DIST_PATH" ] || return 1
+  rm -rf "$bootpath$DIST_PATH"/* || return 1
+  echo "清理 dist 成功"
+)
 emptyDir() {
-  if [ "`ls -A ${bootpath}${DIST_PATH}/`" = "" ]; then
-   echo "${bootpath}${DIST_PATH}/ 是空文件夹,选择最后一次部署版本开始部署...."
-   latest_folder=$(basename "$(ls -dt "${bootpath}${BACK_PATH}"/*/ | head -n 1)")
-   # 检查选择的文件夹是否存在
-   if [ ! -d "${bootpath}${BACK_PATH}/${latest_folder}" ]; then
-     echo "错误：无法找到或确定最新的文件夹。"
-     exit 0;
-   fi
-   # 拷贝文件
-   echo "正在将 ${bootpath}${BACK_PATH}/${latest_folder} 的内容拷贝到 ${bootpath}${DIST_PATH} ..."
-   cp -r "${bootpath}${BACK_PATH}/${latest_folder}/"* "${bootpath}${DIST_PATH}/"
+  local contents latest_folder
+  contents=$(ls -A "$bootpath$DIST_PATH") || return 1
+  if [ -z "$contents" ]; then
+    latest_folder=$(ls -dt "$backpath"/*/ 2>/dev/null | head -n 1)
+    [ -n "$latest_folder" ] && [ -d "$latest_folder" ] || return 1
+    cp -R "$latest_folder/." "$bootpath$DIST_PATH/" || return 1
   fi
 }
-judgeZip() {
-  cd "${bootpath}"${DIST_PATH} || exit
-  zipNum=$(ls -l |grep ".zip"|wc -l)
-  if [ "$zipNum" -eq 1 ];then
-      echo "$bootpath$DIST_PATH 文件夹下存在zip包,开始使用zip包进行部署!"
-      # shellcheck disable=SC2035
-      unzip "${bootpath}"${DIST_PATH}/*.zip
-      rm -rf "${bootpath}"${DIST_PATH}/*.zip
+judgeZip() (
+  # 子 shell 限定 glob 选项；先解压到临时目录，失败保留原始 zip。
+  shopt -s nullglob dotglob
+  local dist="$bootpath$DIST_PATH" staging source zip
+  local zips=("$bootpath$DIST_PATH"/*.zip)
+  [ "${#zips[@]}" -le 1 ] || { echo "存在多个 zip，请手动选择" >&2; return 1; }
+  if [ "${#zips[@]}" -eq 1 ]; then
+    zip=${zips[0]}
+    staging=$(mktemp -d "$bootpath/.unpack.XXXXXX") || return 1
+    if ! unzip -oq "$zip" -d "$staging"; then
+      rm -rf "$staging"
+      return 1
+    fi
+    source="$staging"
+    [ ! -d "$staging/dist" ] || source="$staging/dist"
+    if ! cp -R "$source/." "$dist/"; then
+      rm -rf "$staging"
+      return 1
+    fi
+    rm -rf "$staging" || return 1
   fi
-  # -d 参数判断 dist文件夹 是否存在
-  if [ -d "${bootpath}${DIST_PATH}/dist/" ]; then
-    echo "$bootpath$DIST_PATH 文件夹下存在dist子包,开始进行文件转移!"
-    mv "${bootpath}"${DIST_PATH}/dist/* "${bootpath}"${DIST_PATH}/
-    rm -rf "${bootpath}"${DIST_PATH}/dist
+  if [ -d "$dist/dist" ]; then
+    cp -R "$dist/dist/." "$dist/" || return 1
+    rm -rf "$dist/dist" || return 1
   fi
-}
+  if [ -n "$zip" ]; then
+    rm -f "$zip" || return 1
+  fi
+)
 functionItems() {
   echo
-  echo -e "$GREEN = 0. 部署单个docker容器 $RES"
-  echo -e "$BLUE = 1. 重启 容器 $SERVICE_NAME ($INSTANCES)容器 $RES"
-  echo -e "$RED = 2. 停止容器 $SERVICE_NAME ($INSTANCES)容器 $RES"
-  echo -e "$BLUE = 3. 全部删除容器 $SERVICE_NAME ($INSTANCES)容器 $RES"
-  echo -e "$YELLOW = 4. 查看 $SERVICE_NAME ($INSTANCES)容器 日志(-f) $RES"
-  echo -e "$YELLOW = 5. 创建容器名称文件(服务名称为空的情况下创建) $RES"
+  echo -e "$GREEN = 0. 部署 $SERVICE_NAME ($INSTANCES)容器 $RES"
+  echo -e "$BLUE = 1. 重启 $SERVICE_NAME ($INSTANCES)容器 $RES"
+  echo -e "$RED = 2. 停止容器（不删除） $SERVICE_NAME ($INSTANCES) $RES"
+  echo -e "$BLUE = 3. 删除该服务的全部实例容器 $SERVICE_NAME ($INSTANCES) $RES"
+  echo -e "$YELLOW = 4. 查看日志 $SERVICE_NAME ($INSTANCES) $RES"
+  echo -e "$YELLOW = 5. 创建配置文件和目录（已有文件不覆盖） $RES"
   echo
 }
 upgrade() {
-  init
-  emptyDir
-  judgeZip
-  backHtml
-  rmHtml
-  deleteServerNameAllImage
-  echo -e "${GREEN}删除容器成功${RES}"
-  echo -e "${GREEN}备份镜像成功${RES}"
-  buildImage
-  echo -e "${GREEN}打包镜像成功${SERVICE_NAME}${RES}"
-  runImage
-  echo -e "${GREEN}运行镜像成功${RES}"
+  init || return 1
+  emptyDir || { echo "恢复文件失败" >&2; return 1; }
+  judgeZip || { echo "解压或搬移失败，停止部署" >&2; return 1; }
+  backHtml || { echo "备份失败，停止部署" >&2; return 1; }
+  buildImage || { echo "构建失败，保留旧容器和 dist" >&2; return 1; }
+  runImage || { echo "启动失败，保留 dist" >&2; return 1; }
+  echo "部署成功: $SERVICE_NAME:$DATEVERSION"
+  rmHtml || return 1
+  deleteServerNameAllImage || return 1
   rmDist
 }
 
@@ -562,23 +569,22 @@ main() {
     upgrade
     ;;
   1)
-    restartContainer
-    echo -e "${GREEN}重启容器:${SERVICE_NAME}${RES}"
+    if restartContainer; then echo "重启容器成功"; else echo "重启容器失败" >&2; return 1; fi
     ;;
   2)
-    stopContainer
-    echo -e "${GREEN}停止容器:${SERVICE_NAME}${RES}"
+    if stopContainer; then echo "停止容器成功"; else echo "停止容器失败" >&2; return 1; fi
     ;;
   3)
-    rmContainer
-    echo -e "${GREEN}删除容器:${SERVICE_NAME}${RES}"
+    if rmContainer; then echo "删除容器成功"; else echo "删除容器失败" >&2; return 1; fi
     ;;
   4)
     dockerLogs
     ;;
   5)
     createConfLogs
-    creatNameFile
+    if [ -z "$SERVICE_NAME" ]; then
+      creatNameFile
+    fi
     ;;
   *)
     echo " _________________            "
@@ -604,7 +610,7 @@ var
 
 # 判断是自动部署还是手动部署
 if [ $AUTOMATIC = true ] || [ "$1" == "devops" ]; then
-  upgrade
+  upgrade || exit 1
   if [ $SENDMAIL = true ]; then
     sendMail
   fi

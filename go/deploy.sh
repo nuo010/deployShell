@@ -56,7 +56,7 @@ setupDirs() {
 }
 
 createDockerfile() {
-  cat > "$bootpath/Dockerfile" <<EOF
+  cat > "$bootpath/Dockerfile" <<EOF || return 1
 FROM alpine:3.22
 WORKDIR /app
 COPY $BINARY_NAME .
@@ -66,8 +66,7 @@ RUN apk add --no-cache tzdata
 ENV TZ=Asia/Shanghai
 ENTRYPOINT ["./$BINARY_NAME", "--config", "config"]
 EOF
-  createDockerIgnore
-  echo -e "${GREEN}✅ Dockerfile 和 .dockerignore 已生成${RES}"
+  echo -e "${GREEN}Dockerfile 已生成${RES}"
 }
 
 createDockerIgnore() {
@@ -78,30 +77,37 @@ EOF
 }
 
 backupBinary() {
-  cp "$SERVER_BIN_PATH" "$backpath/${DATEVERSION}_${BINARY_NAME}"
+  mkdir -p "$backpath" || return 1
+  local backup
+  backup=$(mktemp "$backpath/$(date +'%Y%m%d%H%M%S').XXXXXX") || return 1
+  DATEVERSION=${backup##*/}
+  [ ! -e "${backup}_${BINARY_NAME}" ] && [ ! -L "${backup}_${BINARY_NAME}" ] || { rm -f "$backup"; return 1; }
+  if ! cp "$SERVER_BIN_PATH" "${backup}_${BINARY_NAME}"; then
+    rm -f "${backup}_${BINARY_NAME}" "$backup"
+    return 1
+  fi
+  rm -f "$backup" || return 1
   echo -e "${GREEN}📦 二进制已备份: ${backpath}/${DATEVERSION}_${BINARY_NAME}${RES}"
   # 清理旧备份
-  ls -1t "$backpath"/*_"$BINARY_NAME" 2>/dev/null | tail -n +$((ReservedBinNum + 1)) | xargs -r rm
+  local old
+  while IFS= read -r old; do
+    [ -n "$old" ] || continue
+    rm -f "$old" || return 1
+  done < <(ls -1t "$backpath"/*_"$BINARY_NAME" 2>/dev/null | tail -n +$((ReservedBinNum + 1)))
 }
 
 deployDocker() {
   echo -e "${YELLOW}🚀 开始部署 $SERVICE_NAME (实例数: $INSTANCES)${RES}"
 
-  setupDirs
-  backupBinary
-
-  createDockerfile
+  createConfigFiles || return 1
+  backupBinary || { echo "备份失败，停止部署" >&2; return 1; }
 
   # 构建镜像
   echo "📦 构建镜像: $SERVICE_NAME:$DATEVERSION"
-  docker build -t "$SERVICE_NAME:$DATEVERSION" "$bootpath" || { echo "❌ 镜像构建失败"; exit 1; }
+  docker build -t "$SERVICE_NAME:$DATEVERSION" "$bootpath" || { echo "❌ 镜像构建失败"; return 1; }
 
-  # 停止并删除旧容器
-  for ((i=0; i<INSTANCES; i++)); do
-    name="${SERVICE_NAME}-$i"
-    docker stop "$name" 2>/dev/null
-    docker rm -f "$name" 2>/dev/null
-  done
+  # 构建成功后才允许删除旧容器。
+  removeAllContainers || return 1
 
   # 启动新容器（host 网络模式）
   for ((i=0; i<INSTANCES; i++)); do
@@ -114,7 +120,8 @@ deployDocker() {
       -v "$logspath:/app/logs" \
       --restart=unless-stopped \
       --log-opt max-size=100m --log-opt max-file=5 \
-      "$SERVICE_NAME:$DATEVERSION"
+      "$SERVICE_NAME:$DATEVERSION" || { echo "容器启动失败: $name" >&2; return 1; }
+    [ "$(docker inspect --format '{{.State.Running}}' "$name")" = true ] || return 1
   done
 
   # 清理旧镜像（保留最新 N 个）
@@ -126,20 +133,49 @@ deployDocker() {
 
 showMenu() {
   echo
-  echo -e "${GREEN}= 0. 一键部署（构建+启动容器）${RES}"
-  echo -e "${BLUE}= 1. 仅生成 Dockerfile 和目录${RES}"
-  echo -e "${YELLOW}= 2. 查看日志（实例0）${RES}"
-  echo -e "${RED}= 3. 停止并删除所有容器${RES}"
+  echo -e "${GREEN}= 0. 部署（构建+启动容器）${RES}"
+  echo -e "${GREEN}= 1. 重启容器${RES}"
+  echo -e "${RED}= 2. 停止容器（不删除）${RES}"
+  echo -e "${RED}= 3. 删除该服务的全部实例容器${RES}"
+  echo -e "${YELLOW}= 4. 查看日志（实例0）${RES}"
+  echo -e "${YELLOW}= 5. 创建配置文件和目录（已有文件不覆盖）${RES}"
   echo
+}
+
+restartAllContainers() {
+  for ((i=0; i<INSTANCES; i++)); do
+    name="${SERVICE_NAME}-$i"
+    docker restart "$name" || { echo "重启失败: $name；后续实例未执行" >&2; return 1; }
+  done
 }
 
 stopAllContainers() {
   for ((i=0; i<INSTANCES; i++)); do
     name="${SERVICE_NAME}-$i"
-    docker stop "$name" 2>/dev/null
-    docker rm -f "$name" 2>/dev/null
-    echo "⏹️  容器 $name 已删除"
+    docker stop "$name" || { echo "停止失败: $name；后续实例未执行" >&2; return 1; }
   done
+}
+
+removeAllContainers() {
+  local names name suffix
+  names=$(docker container ls -a --format '{{.Names}}') || return
+  while IFS= read -r name; do
+    [[ "$name" == "$SERVICE_NAME-"* ]] || continue
+    suffix=${name#"$SERVICE_NAME-"}
+    [[ "$suffix" =~ ^[0-9]+$ ]] || continue
+    docker container rm -f "$name" || return
+  done <<< "$names"
+  return 0
+}
+
+createConfigFiles() {
+  setupDirs || return 1
+  if [ ! -f "$bootpath/Dockerfile" ]; then
+    createDockerfile || return 1
+  fi
+  if [ ! -f "$bootpath/.dockerignore" ]; then
+    createDockerIgnore || return 1
+  fi
 }
 
 viewLogs() {
@@ -162,9 +198,11 @@ else
     read -p "请选择操作: " choice
     case $choice in
       0) deployDocker ;;
-      1) setupDirs; createDockerfile ;;
-      2) viewLogs ;;
-      3) stopAllContainers ;;
+      1) restartAllContainers ;;
+      2) stopAllContainers ;;
+      3) removeAllContainers ;;
+      4) viewLogs ;;
+      5) createConfigFiles ;;
       *) echo "👋 退出"; break ;;
     esac
     echo "---"
