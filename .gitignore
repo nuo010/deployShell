@@ -4,3 +4,4 @@
 /logs/
 /*.iml
 /**/*.iml
+*.DS_Store
