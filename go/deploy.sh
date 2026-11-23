@@ -58,11 +58,11 @@ setupDirs() {
 createDockerfile() {
   cat > "$bootpath/Dockerfile" <<EOF || return 1
 FROM alpine:3.22
+RUN apk add --no-cache tzdata
 WORKDIR /app
 COPY $BINARY_NAME .
 COPY config ./config
 RUN chmod +x ./$BINARY_NAME
-RUN apk add --no-cache tzdata
 ENV TZ=Asia/Shanghai
 ENTRYPOINT ["./$BINARY_NAME", "--config", "config"]
 EOF
