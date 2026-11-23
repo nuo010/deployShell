@@ -634,7 +634,7 @@ runjars() {
 # shellcheck disable=SC2120
 main() {
   functionItems
-  read -p '⌨输入功能编号: (任意键退出)' input
+  read -p '输入功能编号: (任意键退出)' input
   echo "输入编号:$input"
   echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>开始执行!!!"
   case $input in
