@@ -237,7 +237,7 @@ createConfLogs() {
 
   #如果文件不存在，则创建文件
   if [ ! -f "$bootpath/Dockerfile" ]; then
-    echo -e "${GREEN} 创建DockerFile文件成功!${RES}"
+    echo -e "${GREEN}🧱 创建DockerFile文件成功!${RES}"
     createDockerfile || return 1
   fi
   if [ ! -f "$bootpath/.dockerignore" ]; then
@@ -264,6 +264,7 @@ deleteOldAllImage() {
   #docker image ls
 }
 deleteServerNameAllImage() {
+  echo "🧹 清理旧镜像（保留 $ReservedDockerImagesNum 个）"
   local images tags tag count=0 status=0
   [[ "$ReservedDockerImagesNum" =~ ^[0-9]+$ ]] || return 1
   images=$(docker images --format '{{.Repository}} {{.Tag}}') || return 1
@@ -306,7 +307,7 @@ runImage() {
     name=$SERVICE_NAME-$i
     port=$(($HOST_PORT + $i))
     #    echo "创建容器是:$name:$IP:$port:$OPEN_PORT"
-    echo -e $GREEN"📦创建容器是:>>>>>>>>>>>>>>>>>>>>>>: $name" $RES
+    echo -e "$GREEN▶️ 启动容器: $name $RES"
     # 只挂载logs日志文件配置文件不挂载
     docker run \
       --name "$name" \
@@ -378,6 +379,7 @@ rmContainer() {
     [[ "$name" == "$SERVICE_NAME-"* ]] || continue
     suffix=${name#"$SERVICE_NAME-"}
     [[ "$suffix" =~ ^[0-9]+$ ]] || continue
+    echo "🗑️ 删除容器: $name"
     docker container rm -f "$name" || return
   done <<< "$names"
   return 0
@@ -557,7 +559,7 @@ runjar() {
   sleep 2
   current=$(getJarPid) || return 1
   [ "$current" = "$started" ] || { echo "JAR 启动失败" >&2; return 1; }
-  echo "后台 JAR 已启动，PID: $started"
+  echo "🟢 后台 JAR 已启动，PID: $started"
 }
 # 部署方式为后台运行jar时使用此方法
 backjar() {
@@ -577,7 +579,7 @@ backjar() {
   echo "📦************** 备份完成 ****************"
 }
 rmjar() {
-  echo "❌************** 开始删除多余备份 ****************"
+  echo "🧹 开始删除多余备份"
   #显示文件数， *.*可以改为指定文件类型
   cd "$backpath" || exit
   FileNum=$(ls -l *.jar | wc -l)
@@ -598,24 +600,26 @@ functionItems() {
   echo
   echo
   echo
-  echo -e "$GREEN = 0. 部署 $SERVICE_NAME ($INSTANCES)容器 $RES"
-  echo -e "$BLUE = 1. 重启 $SERVICE_NAME ($INSTANCES)容器 $RES"
-  echo -e "$RED = 2. 停止容器（不删除） $SERVICE_NAME ($INSTANCES) $RES"
-  echo -e "$BLUE = 3. 删除该服务的全部实例容器 $SERVICE_NAME ($INSTANCES) $RES"
-  echo -e "$YELLOW = 4. 查看日志 $SERVICE_NAME ($INSTANCES) $RES"
-  echo -e "$YELLOW = 5. 创建配置文件和目录（已有文件不覆盖） $RES"
-  echo -e "$GREEN = 6. 后台运行 JAR ${bootpath}/${SERVICE_PATH} $RES"
-  echo -e "$BLUE = 7. 备份 JAR 到 back 目录 $RES"
-  echo -e "$RED = 8. 结束后台运行的 JAR 进程 ${bootpath}/${SERVICE_PATH} $RES"
+  echo -e "$GREEN = 0. 🚀 部署 $SERVICE_NAME ($INSTANCES)容器 $RES"
+  echo -e "$BLUE = 1. 🔄 重启 $SERVICE_NAME ($INSTANCES)容器 $RES"
+  echo -e "$RED = 2. 🛑 停止容器（不删除） $SERVICE_NAME ($INSTANCES) $RES"
+  echo -e "$BLUE = 3. 🗑️ 删除该服务的全部实例容器 $SERVICE_NAME ($INSTANCES) $RES"
+  echo -e "$YELLOW = 4. 📝 查看日志 $SERVICE_NAME ($INSTANCES) $RES"
+  echo -e "$YELLOW = 5. 🧱 创建配置文件和目录（已有文件不覆盖） $RES"
+  echo -e "$GREEN = 6. 🟢 后台运行 JAR ${bootpath}/${SERVICE_PATH} $RES"
+  echo -e "$BLUE = 7. 📦 备份 JAR 到 back 目录 $RES"
+  echo -e "$RED = 8. 🛑 结束后台运行的 JAR 进程 ${bootpath}/${SERVICE_PATH} $RES"
 
   echo
 }
 upgrade() {
+  echo "🚀 开始部署: $SERVICE_NAME"
   init || return 1
-  backjar || { echo "备份失败，停止部署" >&2; return 1; }
-  buildImage || { echo "构建失败，保留旧容器" >&2; return 1; }
-  runImage || { echo "启动失败，停止部署" >&2; return 1; }
-  echo "部署成功: $SERVICE_NAME:$DATEVERSION"
+  backjar || { echo "❌ 备份失败，停止部署" >&2; return 1; }
+  echo "🔨 构建镜像: $SERVICE_NAME:$DATEVERSION"
+  buildImage || { echo "❌ 构建失败，保留旧容器" >&2; return 1; }
+  runImage || { echo "❌ 启动失败，停止部署" >&2; return 1; }
+  echo "✅ 部署成功: $SERVICE_NAME:$DATEVERSION"
   rmjar || return 1
   deleteServerNameAllImage
 }
@@ -638,13 +642,13 @@ main() {
     upgrade
     ;;
   1)
-    if restartContainer; then echo "重启容器成功"; else echo "重启容器失败" >&2; return 1; fi
+    if restartContainer; then echo "🔄 重启容器成功"; else echo "❌ 重启容器失败" >&2; return 1; fi
     ;;
   2)
-    if stopContainer; then echo "停止容器成功"; else echo "停止容器失败" >&2; return 1; fi
+    if stopContainer; then echo "🛑 停止容器成功"; else echo "❌ 停止容器失败" >&2; return 1; fi
     ;;
   3)
-    if rmContainer; then echo "删除容器成功"; else echo "删除容器失败" >&2; return 1; fi
+    if rmContainer; then echo "🗑️ 删除容器成功"; else echo "❌ 删除容器失败" >&2; return 1; fi
     ;;
   4)
     dockerLogs
@@ -659,7 +663,7 @@ main() {
     backjar
     ;;
   8)
-    if isPid; then echo "目标 JAR 已停止"; else echo "结束 JAR 失败，请手动检查" >&2; return 1; fi
+    if isPid; then echo "🛑 目标 JAR 已停止"; else echo "❌ 结束 JAR 失败，请手动检查" >&2; return 1; fi
     ;;
   *)
     echo " _________________            "
